@@ -1,0 +1,242 @@
+﻿----------------------------------------------------------------------------------------
+			How to Install Wordpress on NGINX LEMP Stack On Ubuntu 22.04 LTS			
+----------------------------------------------------------------------------------------
+#1 Installing NGINX
+sudo apt update && sudo apt upgrade -y
+sudo apt install curl git wget unzip -y
+sudo apt install nginx
+
+#1.1 Enable Nginx on boot
+sudo systemctl enable nginx
+sudo systemctl status nginx
+
+
+#2 Firewall Settings
+sudo apt install ufw
+
+sudo ufw allow 22
+sudo ufw allow 80
+sudo ufw allow 443
+sudo ufw allow Port_XUI_Panel
+
+sudo ufw enable
+sudo ufw status
+
+
+## test nginx http://your_domain_or_your_IP ##
+
+#3 Install MariaDB
+sudo apt install -y mariadb-server mariadb-client
+
+sudo systemctl start mariadb
+sudo systemctl enable mariadb
+sudo systemctl status mariadb
+
+#3.1 Secure MariaDB With the Secure Installation Script
+
+sudo mysql_secure_installation
+
+#4 Install PHP & PHP-FPM
+## Import Ondřej Surý PHP Repository
+sudo add-apt-repository ppa:ondrej/php -y
+sudo apt update && sudo apt upgrade
+
+#4.1 Option 1. Install PHP 8.0
+sudo apt install php8.0-fpm php8.0-cli php8.0-common php8.0-mbstring php8.0-xmlrpc php8.0-soap php8.0-gd php8.0-xml php8.0-intl php8.0-mysql php8.0-cli php8.0-ldap php8.0-zip php8.0-curl php8.0-opcache php8.0-readline php8.0-xml php8.0-gd -y
+sudo systemctl enable php8.0-fpm --now
+systemctl status php8.0-fpm
+
+#4.2 Option 2. Install PHP 8.1
+sudo apt install php8.1-fpm php8.1-cli php8.1-common php8.1-mbstring php8.1-xmlrpc php8.1-soap php8.1-gd php8.1-xml php8.1-intl php8.1-mysql php8.1-cli php8.1-ldap php8.1-zip php8.1-curl php8.1-opcache php8.1-readline php8.1-xml php8.1-gd -y
+sudo systemctl enable php8.1-fpm --now
+systemctl status php8.1-fpm
+
+
+#5 Create Wordpress Database 
+## login to MariaDB
+sudo mariadb -u root -p
+
+#5.1 Create Wordpress Database
+CREATE DATABASE WordpressDB;
+
+#5.2 Create the WordPress database user:
+CREATE USER 'wpuser'@localhost IDENTIFIED BY 'P@ssw0rd!';
+
+#5.3 Assign the database to the created WordPress user account:
+GRANT ALL PRIVILEGES ON WordpressDB.* TO wpuser@localhost IDENTIFIED BY 'P@ssw0rd!';
+
+#5.4 Flush Privileges and Exit MariaDB
+FLUSH PRIVILEGES;
+EXIT;
+
+#6 Install WordPress with LEMP on Ubuntu 22.04
+## download and Extract Wordpress
+cd /tmp
+wget https://wordpress.org/latest.zip
+sudo unzip latest.zip
+sudo rm latest.zip
+
+#6.1 Create a copy of Sample file for Wordpress config
+sudo cp /tmp/wordpress/wp-config-sample.php /tmp/wordpress/wp-config.php
+
+#6.2 copy the entirity of the WordPress directory we just extracted to our public html directory.
+sudo cp -a /tmp/wordpress/. /var/www/html
+cd /var/www/html && ls
+sudo rm /var/www/html/index.nginx-debian.html && ls
+
+#6.3 Set chown permission (important): 
+sudo chown -R www-data:www-data /var/www/html
+
+## Set chmod permission folders (important):
+sudo find /var/www/html -type d -exec chmod 755 {} \;
+
+## Set chmod permission files (important):
+sudo find /var/www/html -type f -exec chmod 644 {} \;
+
+#6.4 add salt keys to wp-config.php to make it secure.
+curl -s https://api.wordpress.org/secret-key/1.1/salt/
+sudo nano /var/www/html/wp-config.php
+
+#7 Create NGINX server block for Wordpress site
+cd /etc/nginx/sites-available
+
+sudo nano web.itskill365.ml
+
+---------------------------Server Block-------------------------------------
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name web.itskill365.ml;
+    access_log off;
+    location / {
+        rewrite ^ https://$host$request_uri? permanent;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name web.itskill365.ml;
+    root /var/www/html;
+    index index.php index.html index.htm index.nginx-debian.html;
+    autoindex off;
+    ssl_certificate /etc/letsencrypt/live/web.itskill365.ml/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/web.itskill365.ml/privkey.pem;
+    ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location ~ \.php$ {
+         include snippets/fastcgi-php.conf;
+         fastcgi_pass unix:/var/run/php/php-fpm.sock;
+         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+         include fastcgi_params;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.php$is_args$args;
+    }
+    location = /favicon.ico { log_not_found off; access_log off; }
+    location = /robots.txt { log_not_found off; access_log off; allow all; }
+    location ~* \.(css|gif|ico|jpeg|jpg|js|png)$ {
+        expires max;
+        log_not_found off;
+    }
+
+
+-----------------------------------------------------------------------------
+#7.1 add revers proxy block code to the end of your wordpress site
+
+--------------------------------------------------------------------------
+Referense Link: https://telegra.ph/reverse-proxy-on-nginx-for-x-ui-11-08
+--------------------------------------------------------------------------
+cd /etc/nginx/sites-available
+
+sudo nano web.itskill365.ml
+
+---------------------------revers proxy block code-----------------------------------
+location /downloader {
+
+        if ($http_upgrade != "websocket") {
+
+            return 404;
+
+        }
+
+        location ~ /downloader/\d\d\d\d\d$ {
+
+            if ($request_uri ~* "([^/]*$)" ) {
+
+                set $port $1;
+
+            }
+
+            proxy_redirect off;
+
+            proxy_pass http://127.0.0.1:$port/;
+
+            proxy_http_version 1.1;
+
+            proxy_set_header Upgrade $http_upgrade;
+
+            proxy_set_header Connection "upgrade";
+
+            proxy_set_header Host $host;
+
+            proxy_set_header X-Real-IP $remote_addr;
+
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        }
+
+        return 404;
+
+    }
+
+}
+
+-------------------------------------------------------------------------------
+
+#8 Get a free SSL certificate
+sudo apt install certbot -y
+
+sudo systemctl stop nginx
+
+sudo certbot certonly --standalone --preferred-challenges http --agree-tos --email test@itskill365.ml -d web.itskill365.ml
+
+sudo systemctl start nginx
+
+**** now you can go ahead and enable CDN/Proxy on your website ****
+
+#9 enable wordpress website in nginx
+sudo ln -s /etc/nginx/sites-available/web.itskill365.ml /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+
+#10 disable nginx default website
+
+sudo rm /etc/nginx/sites-enabled/default
+
+cd /etc/nginx/sites-enabled && ls -la
+
+sudo systemctl restart nginx
+
+#11 access your website and perform last configuration
+https://Your_DomainName_or_Server_IP/wp-admin/
+
+#12 install X-UI panel "https://github.com/vaxilu/x-ui/"
+
+sudo bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
+
+#12.1 
+cd 
+wget https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh
+sudo chmod +x install.sh
+sudo bash install.sh
+
+/etc/letsencrypt/live/web.itskill365.ml/fullchain.pem
+/etc/letsencrypt/live/web.itskill365.ml/privkey.pem
+
+## get in touch with us! ##
+
+
